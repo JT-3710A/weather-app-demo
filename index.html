@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weather Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600&family=Roboto&display=swap" rel="stylesheet">
+  <style>
+    .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .uv-low { background-color: #a8e05f; color: #333; }
+    .uv-moderate { background-color: #fdd74f; color: #333; }
+    .uv-high { background-color: #ff9b57; color: #333; }
+    .uv-very-high { background-color: #fe6a69; color: white; }
+    .uv-extreme { background-color: #a97abc; color: white; }
+    canvas { max-width: 100%; height: auto !important; }
+  </style>
+</head>
+<body class="flex flex-col min-h-screen bg-gradient-to-br from-sky-100 to-indigo-200 font-roboto">
+  <header class="bg-white shadow py-4 px-6 flex flex-col sm:flex-row items-center justify-between space-y-2 sm:space-y-0">
+    <h1 class="text-2xl font-montserrat text-indigo-700">Weather Dashboard</h1>
+    <div class="flex items-center space-x-2">
+      <input id="cityInput" type="text" placeholder="Enter city name" class="w-48 sm:w-64 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
+      <button id="fetchBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Search</button>
+      <button id="geoBtn" title="Use my location" class="p-2 bg-gray-200 text-indigo-600 rounded-lg hover:bg-gray-300">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" /></svg>
+      </button>
+    </div>
+  </header>
+  <div class="flex flex-1 overflow-hidden">
+    <nav class="w-64 bg-white shadow-inner p-4 overflow-y-auto flex-shrink-0 hidden sm:block">
+      <h3 class="text-lg font-semibold text-gray-700 mb-2">Navigation</h3>
+      <ul class="space-y-3 mb-6">
+        <li><button data-view="current" class="nav-link text-indigo-700 w-full text-left px-2 py-1 rounded hover:bg-indigo-50">Current</button></li>
+        <li><button data-view="hourly" class="nav-link text-gray-600 w-full text-left px-2 py-1 rounded hover:bg-indigo-50">Hourly</button></li>
+        <li><button data-view="daily" class="nav-link text-gray-600 w-full text-left px-2 py-1 rounded hover:bg-indigo-50">Daily</button></li>
+      </ul>
+      <h3 class="text-lg font-semibold text-gray-700 mb-2">Recent Searches</h3>
+      <ul id="recentCitiesList" class="space-y-2"></ul>
+    </nav>
+    <div class="sm:hidden bg-white p-2 w-full">
+      <div class="flex justify-center space-x-4">
+        <button data-view="current" class="nav-link text-indigo-700 px-3 py-1 rounded hover:bg-indigo-50">Current</button>
+        <button data-view="hourly" class="nav-link text-gray-600 px-3 py-1 rounded hover:bg-indigo-50">Hourly</button>
+        <button data-view="daily" class="nav-link text-gray-600 px-3 py-1 rounded hover:bg-indigo-50">Daily</button>
+      </div>
+    </div>
+    <main class="flex-1 p-4 sm:p-6 overflow-y-auto">
+      <div id="loader" class="hidden loader"></div>
+      <div id="error" class="text-red-600 mb-2 min-h-[1.2rem] text-center font-semibold"></div>
+      <section id="view-current" class="view">
+        <div id="weather" class="bg-white rounded-lg p-6 shadow mb-6"></div>
+      </section>
+      <section id="view-hourly" class="view hidden">
+        <h2 class="text-xl font-semibold mb-4">Hourly Forecast</h2>
+        <div class="bg-white p-4 rounded-lg shadow mb-6">
+          <p class="text-sm text-gray-500 mb-2">Note: OpenWeather student API provides limited hourly data</p>
+          <div id="hourly-cards" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow mb-6"><canvas id="tempChart"></canvas></div>
+      </section>
+      <section id="view-daily" class="view hidden">
+        <h2 class="text-xl font-semibold mb-4">Daily Forecast</h2>
+        <div class="bg-white p-4 rounded-lg shadow mb-6">
+          <p class="text-sm text-gray-500 mb-2">Note: OpenWeather student API provides limited daily data</p>
+          <div id="daily" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <footer class="bg-white text-center py-4 text-gray-500 text-xs">Weather App Demo | Using OpenWeather API</footer>
+
+  <!-- Config file for API key -->
+  <script>
+    // Configuration
+    const CONFIG = {
+      // Replace with your OpenWeather API key
+      // In a production app, this would be stored securely and not in client-side code
+      API_KEY: "432951ee2422f1d337b14784f5465fcb",
+      UNITS: "metric", // metric (Celsius) or imperial (Fahrenheit)
+      LANG: "en",     // Language for API responses
+      MAX_RECENT_CITIES: 5
+    };
+  </script>
+
+  <script>
+    // API endpoints
+    const GEOCODING_API_URL = 'https://api.openweathermap.org/geo/1.0/direct';
+    const REVERSE_GEOCODING_API_URL = 'https://api.openweathermap.org/geo/1.0/reverse';
+    const WEATHER_API_URL = 'https://api.openweathermap.org/data/2.5/weather';
+    const FORECAST_API_URL = 'https://api.openweathermap.org/data/2.5/forecast';
+    const ONECALL_API_URL = 'https://api.openweathermap.org/data/3.0/onecall'; // May not be available with student API
+    
+    // DOM elements
+    const cityInput = document.getElementById('cityInput');
+    const fetchBtn = document.getElementById('fetchBtn');
+    const geoBtn = document.getElementById('geoBtn');
+    const errorDiv = document.getElementById('error');
+    const loaderDiv = document.getElementById('loader');
+    const recentCitiesList = document.getElementById('recentCitiesList');
+    let tempChart;
+
+    // Weather icon mapping
+    const WEATHER_ICONS = {
+      '01d': '☀️', '01n': '🌙', // clear sky
+      '02d': '🌤️', '02n': '🌤️', // few clouds
+      '03d': '☁️', '03n': '☁️', // scattered clouds
+      '04d': '☁️', '04n': '☁️', // broken clouds
+      '09d': '🌧️', '09n': '🌧️', // shower rain
+      '10d': '🌦️', '10n': '🌦️', // rain
+      '11d': '⛈️', '11n': '⛈️', // thunderstorm
+      '13d': '❄️', '13n': '❄️', // snow
+      '50d': '🌫️', '50n': '🌫️'  // mist
+    };
+
+    // Helper functions
+    function getWeatherIcon(iconCode) {
+      return WEATHER_ICONS[iconCode] || '❓';
+    }
+
+    function getUVIndexInfo(uvi) {
+      if (uvi === null || uvi === undefined) return { text: 'N/A', class: '' };
+      if (uvi < 3) return { text: `Low (${uvi.toFixed(1)})`, class: 'uv-low' };
+      if (uvi < 6) return { text: `Moderate (${uvi.toFixed(1)})`, class: 'uv-moderate' };
+      if (uvi < 8) return { text: `High (${uvi.toFixed(1)})`, class: 'uv-high' };
+      if (uvi < 11) return { text: `Very High (${uvi.toFixed(1)})`, class: 'uv-very-high' };
+      return { text: `Extreme (${uvi.toFixed(1)})`, class: 'uv-extreme' };
+    }
+
+    function getWindDirection(degrees) {
+      if (degrees === null || degrees === undefined) return '';
+      const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+      return directions[Math.round(degrees / 22.5) % 16];
+    }
+
+    function formatDate(timestamp, options) {
+      return new Date(timestamp * 1000).toLocaleString('en-US', options);
+    }
+
+    function formatHour(timestamp) {
+      try {
+        return new Date(timestamp * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      } catch (e) {
+        return "Invalid Time";
+      }
+    }
+
+    function formatDay(timestamp) {
+      try {
+        return new Date(timestamp * 1000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      } catch (e) {
+        return "Invalid Date";
+      }
+    }
+
+    // API functions
+    async function geocode(city) {
+      const url = `${GEOCODING_API_URL}?q=${encodeURIComponent(city)}&limit=1&appid=${CONFIG.API_KEY}`;
+      
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Geocoding failed: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (!data || data.length === 0) {
+          throw new Error('Location not found. Try a different name or be more specific.');
+        }
+        
+        return {
+          name: data[0].name,
+          country: data[0].country,
+          state: data[0].state,
+          lat: data[0].lat,
+          lon: data[0].lon
+        };
+      } catch (error) {
+        console.error("Geocoding Error:", error);
+        throw error;
+      }
+    }
+
+    async function reverseGeocode(lat, lon) {
+      const url = `${REVERSE_GEOCODING_API_URL}?lat=${lat}&lon=${lon}&limit=1&appid=${CONFIG.API_KEY}`;
+      
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Reverse geocoding failed: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (!data || data.length === 0) {
+          return {
+            name: "Current Location",
+            country: "",
+            state: "",
+            lat: lat,
+            lon: lon
+          };
+        }
+        
+        return {
+          name: data[0].name,
+          country: data[0].country,
+          state: data[0].state,
+          lat: lat,
+          lon: lon
+        };
+      } catch (error) {
+        console.error("Reverse Geocoding Error:", error);
+        return {
+          name: "Current Location",
+          country: "",
+          state: "",
+          lat: lat,
+          lon: lon
+        };
+      }
+    }
+
+    async function fetchCurrentWeather(lat, lon) {
+      const url = `${WEATHER_API_URL}?lat=${lat}&lon=${lon}&units=${CONFIG.UNITS}&lang=${CONFIG.LANG}&appid=${CONFIG.API_KEY}`;
+      
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Weather data not available. API Status: ${response.status}`);
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.error("Current Weather Error:", error);
+        throw error;
+      }
+    }
+
+    async function fetchForecast(lat, lon) {
+      const url = `${FORECAST_API_URL}?lat=${lat}&lon=${lon}&units=${CONFIG.UNITS}&lang=${CONFIG.LANG}&appid=${CONFIG.API_KEY}`;
+      
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Forecast data not available. API Status: ${response.status}`);
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.error("Forecast Error:", error);
+        throw error;
+      }
+    }
+
+    // Optional: Try OneCall API if available with student API key
+    async function fetchOneCall(lat, lon) {
+      try {
+        const url = `${ONECALL_API_URL}?lat=${lat}&lon=${lon}&units=${CONFIG.UNITS}&lang=${CONFIG.LANG}&exclude=minutely&appid=${CONFIG.API_KEY}`;
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          console.warn("OneCall API not available with current API key. Using standard forecast instead.");
+          return null;
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.warn("OneCall API Error (expected with student API):", error);
+        return null;
+      }
+    }
+
+    // Render functions
+    function renderCurrent(location, data) {
+      const weatherDiv = document.getElementById('weather');
+      
+      if (!data || !data.main) {
+        weatherDiv.innerHTML = '<p class="text-center text-gray-500">Current weather data not available.</p>';
+        return;
+      }
+      
+      const temp = Math.round(data.main.temp);
+      const feelsLike = Math.round(data.main.feels_like);
+      const weatherIcon = getWeatherIcon(data.weather[0].icon);
+      const weatherDesc = data.weather[0].description;
+      const humidity = data.main.humidity;
+      const windSpeed = data.wind.speed;
+      const windDir = getWindDirection(data.wind.deg);
+      const sunrise = formatHour(data.sys.sunrise);
+      const sunset = formatHour(data.sys.sunset);
+      const locationName = `${location.name}${location.state ? ', ' + location.state : ''}${location.country ? ', ' + location.country : ''}`;
+      
+      weatherDiv.innerHTML = `
+        <div class="flex justify-between items-start mb-4">
+          <div>
+            <h2 class="text-2xl sm:text-3xl font-semibold text-indigo-800 mb-1">${locationName}</h2>
+            <p class="text-gray-600">${formatDate(data.dt, {weekday:'long', month:'long', day:'numeric', hour:'numeric', minute:'numeric', hour12:true})}</p>
+            <p class="text-gray-500 text-sm">Last updated: ${formatHour(data.dt)}</p>
+          </div>
+          <div class="text-right">
+            <div class="text-5xl sm:text-6xl">${weatherIcon}</div>
+            <div class="text-gray-700 font-medium capitalize">${weatherDesc}</div>
+          </div>
+        </div>
+        
+        <div class="flex items-center mb-6 space-x-4">
+          <div>
+            <div class="text-4xl sm:text-6xl font-bold">${temp}°${CONFIG.UNITS === 'metric' ? 'C' : 'F'}</div>
+            <div class="text-gray-600">Feels like: ${feelsLike}°${CONFIG.UNITS === 'metric' ? 'C' : 'F'}</div>
+          </div>
+        </div>
+        
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 text-gray-700 mb-4 text-sm">
+          <div class="p-3 bg-slate-50 rounded-lg">
+            <span class="font-semibold">Humidity:</span> ${humidity}%
+          </div>
+          <div class="p-3 bg-slate-50 rounded-lg">
+            <span class="font-semibold">Wind:</span> ${windSpeed} ${CONFIG.UNITS === 'metric' ? 'km/h' : 'mph'} ${windDir}
+          </div>
+          <div class="p-3 bg-slate-50 rounded-lg">
+            <span class="font-semibold">Pressure:</span> ${data.main.pressure} hPa
+          </div>
+          <div class="p-3 bg-slate-50 rounded-lg">
+            <span class="font-semibold">Visibility:</span> ${(data.visibility / 1000).toFixed(1)} km
+          </div>
+          <div class="p-3 bg-slate-50 rounded-lg">
+            <span class="font-semibold">Sunrise:</span> ${sunrise}
+          </div>
+          <div class="p-3 bg-slate-50 rounded-lg">
+            <span class="font-semibold">Sunset:</span> ${sunset}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderHourly(data) {
+      const hourlyCardsDiv = document.getElementById('hourly-cards');
+      
+      if (!data || !data.list || data.list.length === 0) {
+        hourlyCardsDiv.innerHTML = '<p class="text-center text-gray-500">Hourly forecast data not available.</p>';
+        tempChart?.destroy?.();
+        tempChart = null;
+        return;
+      }
+      
+      // Get the next 24 hours (8 entries for 3-hour intervals)
+      const hourlyData = data.list.slice(0, 8);
+      
+      // Render hourly cards
+      hourlyCardsDiv.innerHTML = hourlyData.map(item => {
+        const temp = Math.round(item.main.temp);
+        const weatherIcon = getWeatherIcon(item.weather[0].icon);
+        const weatherDesc = item.weather[0].description;
+        const time = formatHour(item.dt);
+        const date = formatDay(item.dt).split(',')[0]; // Just get the day name
+        const humidity = item.main.humidity;
+        const windSpeed = item.wind.speed;
+        const windDir = getWindDirection(item.wind.deg);
+        const precipProb = item.pop ? Math.round(item.pop * 100) : 0;
+        
+        return `
+          <div class="bg-white rounded-lg p-3 shadow text-center flex flex-col justify-between items-center hover:shadow-lg transition-shadow duration-200">
+            <div class="text-xs mb-1 text-gray-500">${date}</div>
+            <div class="text-sm mb-1 text-gray-600">${time}</div>
+            <div class="text-3xl my-1">${weatherIcon}</div>
+            <div class="text-gray-600 text-sm capitalize">${weatherDesc}</div>
+            <div class="font-bold text-lg mb-1">${temp}°${CONFIG.UNITS === 'metric' ? 'C' : 'F'}</div>
+            <div class="text-xs text-gray-600 mb-1">💨 ${windSpeed} ${CONFIG.UNITS === 'metric' ? 'km/h' : 'mph'} ${windDir}</div>
+            <div class="text-xs text-blue-500"><span class="opacity-70">💧</span> ${precipProb}%</div>
+          </div>
+        `;
+      }).join('');
+      
+      // Create temperature chart
+      tempChart?.destroy?.();
+      
+      const chartLabels = hourlyData.map(item => formatHour(item.dt));
+      const temps = hourlyData.map(item => item.main.temp);
+      const feelsLike = hourlyData.map(item => item.main.feels_like);
+      
+      tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: chartLabels,
+          datasets: [
+            {
+              label: `Temperature (°${CONFIG.UNITS === 'metric' ? 'C' : 'F'})`,
+              data: temps,
+              borderColor: 'rgb(255,99,132)',
+              tension: 0.3,
+              fill: false
+            },
+            {
+              label: `Feels Like (°${CONFIG.UNITS === 'metric' ? 'C' : 'F'})`,
+              data: feelsLike,
+              borderColor: 'rgb(54,162,235)',
+              tension: 0.3,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              ticks: {
+                maxRotation: 0,
+                autoSkip: true,
+                maxTicksLimit: 12,
+                padding: 10
+              }
+            }
+          },
+          plugins: {
+            title: {
+              display: true,
+              text: 'Temperature Forecast'
+            }
+          }
+        }
+      });
+    }
+
+    function renderDaily(data) {
+      const dailyDiv = document.getElementById('daily');
+      
+      if (!data || !data.list || data.list.length === 0) {
+        dailyDiv.innerHTML = '<p class="text-center text-gray-500">Daily forecast data not available.</p>';
+        return;
+      }
+      
+      // Group forecast by day
+      const dailyData = [];
+      const days = {};
+      
+      data.list.forEach(item => {
+        const date = new Date(item.dt * 1000).toLocaleDateString('en-US');
+        
+        if (!days[date]) {
+          days[date] = {
+            dt: item.dt,
+            temp_min: item.main.temp_min,
+            temp_max: item.main.temp_max,
+            weather: item.weather[0],
+            wind: item.wind,
+            pop: item.pop || 0
+          };
+          dailyData.push(days[date]);
+        } else {
+          // Update min/max temperatures
+          if (item.main.temp_min < days[date].temp_min) days[date].temp_min = item.main.temp_min;
+          if (item.main.temp_max > days[date].temp_max) days[date].temp_max = item.main.temp_max;
+          // Update precipitation probability
+          if (item.pop > days[date].pop) days[date].pop = item.pop;
+        }
+      });
+      
+      // Limit to 5 days
+      const daysToShow = dailyData.slice(0, 5);
+      
+      dailyDiv.innerHTML = daysToShow.map(day => {
+        const weatherIcon = getWeatherIcon(day.weather.icon);
+        const weatherDesc = day.weather.description;
+        const tempMax = Math.round(day.temp_max);
+        const tempMin = Math.round(day.temp_min);
+        const windSpeed = day.wind.speed;
+        const windDir = getWindDirection(day.wind.deg);
+        const precipProb = Math.round(day.pop * 100);
+        
+        return `
+          <div class="bg-white p-4 rounded-lg shadow text-center flex flex-col justify-between hover:shadow-lg transition-shadow duration-200">
+            <div>
+              <div class="font-medium mb-1 text-indigo-700">${formatDay(day.dt)}</div>
+              <div class="text-4xl my-2">${weatherIcon}</div>
+              <div class="text-gray-600 text-sm mb-2 capitalize">${weatherDesc}</div>
+            </div>
+            <div class="space-y-2">
+              <div class="text-xl font-bold">${tempMax}° / ${tempMin}°</div>
+              <div class="text-sm text-gray-600">💨 ${windSpeed} ${CONFIG.UNITS === 'metric' ? 'km/h' : 'mph'} ${windDir}</div>
+              <div class="text-sm text-blue-500">💧 ${precipProb}%</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Local storage functions
+    function addRecentCity(cityFullName, lat, lon) {
+      let cities = JSON.parse(localStorage.getItem('recentCitiesData')) || [];
+      
+      // Remove if already exists
+      cities = cities.filter(c => c.name.toLowerCase() !== cityFullName.toLowerCase());
+      
+      // Add to beginning
+      cities.unshift({
+        name: cityFullName,
+        lat: lat,
+        lon: lon
+      });
+      
+      // Limit to max cities
+      if (cities.length > CONFIG.MAX_RECENT_CITIES) cities.pop();
+      
+      localStorage.setItem('recentCitiesData', JSON.stringify(cities));
+      renderRecentCities();
+    }
+
+    function renderRecentCities() {
+      const cities = JSON.parse(localStorage.getItem('recentCitiesData')) || [];
+      
+      recentCitiesList.innerHTML = cities.map(cityData => `
+        <li>
+          <button class="text-sm text-gray-700 hover:text-indigo-600 w-full text-left px-2 py-1 rounded hover:bg-indigo-50 recent-city-btn"
+                  data-city-name="${cityData.name}"
+                  data-lat="${cityData.lat}"
+                  data-lon="${cityData.lon}">
+            ${cityData.name}
+          </button>
+        </li>
+      `).join('');
+      
+      document.querySelectorAll('.recent-city-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          const target = e.currentTarget;
+          cityInput.value = target.dataset.cityName;
+          loadWeatherData(target.dataset.cityName, parseFloat(target.dataset.lat), parseFloat(target.dataset.lon));
+        });
+      });
+    }
+
+    // Main function to load weather data
+    async function loadWeatherData(city, lat, lon) {
+      loaderDiv.classList.remove('hidden');
+      errorDiv.textContent = '';
+      document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+      
+      try {
+        let locationData;
+        
+        // Get location data
+        if (city && (lat === null || lon === null)) {
+          locationData = await geocode(city);
+        } else if (lat !== null && lon !== null) {
+          locationData = await reverseGeocode(lat, lon);
+          if (city) locationData.name = city.split(',')[0].trim();
+        } else {
+          throw new Error("No location information provided.");
+        }
+        
+        if (locationData.lat === undefined || locationData.lon === undefined) {
+          throw new Error("Could not determine coordinates for the location.");
+        }
+        
+        // Fetch weather data
+        const currentWeather = await fetchCurrentWeather(locationData.lat, locationData.lon);
+        const forecastData = await fetchForecast(locationData.lat, locationData.lon);
+        
+        // Try OneCall API if available (may not work with student API)
+        const oneCallData = await fetchOneCall(locationData.lat, locationData.lon);
+        
+        // Render weather data
+        renderCurrent(locationData, currentWeather);
+        renderHourly(forecastData);
+        renderDaily(forecastData);
+        
+        // Show the active view
+        const activeNavButton = document.querySelector('.nav-link.text-indigo-700') || document.querySelector('[data-view=current]');
+        document.getElementById('view-' + activeNavButton.dataset.view).classList.remove('hidden');
+        
+        // Update city input and add to recent cities
+        const displayCityName = `${locationData.name}${locationData.state ? ', ' + locationData.state : ''}${locationData.country ? ', ' + locationData.country : ''}`;
+        cityInput.value = displayCityName;
+        addRecentCity(displayCityName, locationData.lat, locationData.lon);
+        
+      } catch (error) {
+        console.error("Error in loadWeatherData:", error);
+        errorDiv.textContent = error.message || 'An unknown error occurred.';
+        document.getElementById('weather').innerHTML = '<p class="text-center text-gray-500">Could not load weather data.</p>';
+        document.getElementById('hourly-cards').innerHTML = '';
+        document.getElementById('daily').innerHTML = '';
+        tempChart?.destroy?.();
+        tempChart = null;
+        document.getElementById('view-current').classList.remove('hidden');
+      } finally {
+        loaderDiv.classList.add('hidden');
+      }
+    }
+
+    // Geolocation handler
+    async function handleGeoLocation() {
+      if (navigator.geolocation) {
+        loaderDiv.classList.remove('hidden');
+        errorDiv.textContent = '';
+        
+        try {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              timeout: 10000
+            });
+          });
+          
+          await loadWeatherData(null, position.coords.latitude, position.coords.longitude);
+        } catch (geoError) {
+          errorDiv.textContent = `Geolocation Error: ${geoError.message}. Ensure location services are enabled.`;
+        } finally {
+          loaderDiv.classList.add('hidden');
+        }
+      } else {
+        errorDiv.textContent = 'Geolocation is not supported by your browser.';
+      }
+    }
+
+    // Event listeners
+    document.querySelectorAll('.nav-link').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+        document.querySelectorAll('.nav-link').forEach(n => {
+          n.classList.remove('text-indigo-700', 'bg-indigo-100', 'font-semibold');
+          n.classList.add('text-gray-600');
+        });
+        
+        btn.classList.add('text-indigo-700', 'bg-indigo-100', 'font-semibold');
+        btn.classList.remove('text-gray-600');
+        document.getElementById('view-' + btn.dataset.view).classList.remove('hidden');
+      });
+    });
+
+    fetchBtn.addEventListener('click', () => {
+      const city = cityInput.value.trim();
+      if (city) loadWeatherData(city, null, null);
+      else errorDiv.textContent = 'Please enter a city name.';
+    });
+
+    cityInput.addEventListener('keypress', e => {
+      if (e.key === 'Enter') fetchBtn.click();
+    });
+
+    geoBtn.addEventListener('click', handleGeoLocation);
+
+    // Initialize on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      renderRecentCities();
+      
+      const initialLoad = async () => {
+        const recentCitiesData = JSON.parse(localStorage.getItem('recentCitiesData')) || [];
+        
+        if (recentCitiesData.length > 0) {
+          const lastCity = recentCitiesData[0];
+          cityInput.value = lastCity.name;
+          await loadWeatherData(lastCity.name, lastCity.lat, lastCity.lon);
+        } else {
+          const defaultCity = 'London';
+          cityInput.value = defaultCity;
+          await loadWeatherData(defaultCity, null, null);
+        }
+        
+        const currentViewButton = document.querySelector('.nav-link.text-indigo-700') || document.querySelector('[data-view=current]');
+        currentViewButton?.click();
+      };
+      
+      initialLoad();
+    });
+  </script>
+</body>
+</html>
